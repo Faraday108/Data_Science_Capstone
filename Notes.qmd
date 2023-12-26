@@ -1,0 +1,207 @@
+---
+title: "Notes"
+format: html
+---
+
+## Project Overview  
+Around the world, people are spending an increasing amount of time on their mobile devices for email, social networking, banking and a whole range of other activities. But typing on mobile devices can be a serious pain. SwiftKey, our corporate partner in this capstone, builds a smart keyboard that makes it easier for people to type on their mobile devices. One cornerstone of their smart keyboard is predictive text models. When someone types:  
+
+I went to the
+
+the keyboard presents three options for what the next word might be. For example, the three words might be gym, store, restaurant. In this capstone you will work on understanding and building predictive text models like those used by SwiftKey.  
+
+This course will start with the basics, analyzing a large corpus of text documents to discover the structure in the data and how words are put together. It will cover cleaning and analyzing text data, then building and sampling from a predictive text model. Finally, you will use the knowledge you gained in data products to build a predictive text product you can show off to your family, friends, and potential employers.
+
+You will use all of the skills you have learned during the Data Science Specialization in this course, but you'll notice that we are tackling a brand new application: analysis of text data and natural language processing. This choice is on purpose. As a practicing data scientist you will be frequently confronted with new data types and problems. A big part of the fun and challenge of being a data scientist is figuring out how to work with these new data types to build data products people love. The capstone will be evaluated based on the following assessments:  
+
+1. An introductory quiz to test whether you have downloaded and can manipulate the data.
+
+2. An intermediate R markdown report that describes in plain language, plots, and code your exploratory analysis of the course data set.
+
+3. Two natural language processing quizzes, where you apply your predictive model to real data to check how it is working.
+
+4. A Shiny app that takes as input a phrase (multiple words), one clicks submit, and it predicts the next word.
+
+5. A 5 slide deck created with R presentations pitching your algorithm and app to your boss or investor.  
+
+During the capstone you can get support from your fellow students, from us, and from the engineers at SwiftKey. But we really want you to show your independence, creativity, and initiative. We have been incredibly impressed by your performance in the classes up until now and know you can do great things.
+
+We have compiled some basic natural language processing resources below. You are welcome to use these resources or any others you can find while performing this analysis. One thing to keep in mind is that we do not expect you to become a world's expert in natural language processing. The point of this capstone is for you to show you can explore a new data type, quickly get up to speed on a new application, and implement a useful model in a reasonable period of time. We think NLP is very cool and depending on your future goals may be worth studying more in-depth, but you can complete this project by using your general knowledge of data science and basic knowledge of NLP. 
+
+Here are a few resources that might be good places to start as you tackle this ambitious project.
+
+[Text mining infrastucture in R](http://www.jstatsoft.org/v25/i05/)
+
+[CRAN Task View: Natural Language Processing](http://cran.r-project.org/web/views/NaturalLanguageProcessing.html)
+
+[Videos](https://www.youtube.com/user/OpenCourseOnline/search?query=NLP) and [Slides](https://web.stanford.edu/~jurafsky/NLPCourseraSlides.html) from Stanford Natural Language Processing course
+
+## Syllabus  
+### Course Tasks  
+This course will be separated into 8 different tasks that cover the range of activities encountered by a practicing data scientist. They mirror many of the skills you have developed in the data science specialization. The tasks are:
+
+* Understanding the problem
+
+* Data acquisition and cleaning
+
+* Exploratory analysis
+
+* Statistical modeling
+
+* Predictive modeling
+
+* Creative exploration
+
+* Creating a data product
+
+* Creating a short slide deck pitching your product
+
+You will hear about each of these tasks over the course of the capstone.
+
+### Course dataset  
+[data](https://d396qusza40orc.cloudfront.net/dsscapstone/dataset/Coursera-SwiftKey.zip)
+
+## Task 0  
+* Obtain the data from the course website 
+* Familiarize yourself with the background - NLP and text modeling. 
+
+The first step in analyzing any new data set is figuring out: (a) what data you have and (b) what are the standard tools and models used for that type of data. Make sure you have downloaded the data from Coursera before heading for the exercises. This exercise uses the files named LOCALE.blogs.txt where LOCALE is the each of the four locales en_US, de_DE, ru_RU and fi_FI. The data is from a corpus called HC Corpora. See the About the Corpora reading for more details. The files have been language filtered but may still contain some foreign text.
+
+In this capstone we will be applying data science in the area of natural language processing. As a first step toward working on this project, you should familiarize yourself with Natural Language Processing, Text Mining, and the associated tools in R. Here are some resources that may be helpful to you.
+
+See the above "Text mining infrastructure in R" and "CRAN Task View: Natural Language Processing" in addition to [Natural language processing Wikipedia page](https://en.wikipedia.org/wiki/Natural_language_processing). 
+
+Data is downloaded as follows: 
+
+```{r}
+library(readr)
+if (!file.exists("Coursera-SwiftKey.zip")) {
+download.file("https://d396qusza40orc.cloudfront.net/dsscapstone/dataset/Coursera-SwiftKey.zip", "Coursera-Swiftkey")
+}
+if (!file.exists("final")) {
+  unzip("Coursera-SwiftKey.zip")
+}
+data <- read("final/de_De/de_DE.blogs.txt")
+```
+
+## Cleaning the data  
+How to deal with digits, capital, typos. Think of optimal strategy for dealing with these issues. 
+
+### Tasks to accomplish  
+* Tokenization - identifying appropriate tokens such as words, punctuation, and numbers. Writing a function that takes a file as input and returns a tokenized version of it.
+
+* Profanity filtering - removing profanity and other words you do not want to predict.
+
+### Tips, tricks, hints  
+1. **Loading the data in**. This dataset is fairly large. We emphasize that you don't necessarily need to load the entire dataset in to build your algorithms (see point 2 below). At least initially, you might want to use a smaller subset of the data. Reading in chunks or lines using R's readLines or scan functions can be useful. You can also loop over each line of text by embedding readLines within a for/while loop, but this may be slower than reading in large chunks at a time. Reading pieces of the file at a time will require the use of a file connection in R. For example, the following code could be used to read the first few lines of the English Twitter dataset:con <- file("en_US.twitter.txt", "r") readLines(con, 1) ## Read the first line of text readLines(con, 1) ## Read the next line of text readLines(con, 5) ## Read in the next 5 lines of text close(con) ## It's important to close the connection when you are done. See the connections help page for more information.
+
+2. **Sampling**. To reiterate, to build models you don't need to load in and use all of the data. Often relatively few randomly selected rows or chunks need to be included to get an accurate approximation to results that would be obtained using all the data. Remember your inference class and how a representative sample can be used to infer facts about a population. You might want to create a separate sub-sample dataset by reading in a random subset of the original data and writing it out to a separate file. That way, you can store the sample and not have to recreate it every time. You can use the rbinom function to "flip a biased coin" to determine whether you sample a line of text or not.
+
+```{r}
+con <- file("final/en_US/en_US.twitter.txt", "r")
+readLines(con, 1)
+close(con)
+```
+
+### Regex review  
+* Combination of literals and *metacharacters*
+* literal is words, metachar is grammar
+* Regex has rich set of metacharacters
+
+* Literals match exactly. Such as "nuclear". Simplest pattern of regex, match occurs if sequence of literals occurs anywhere in text being tested. 
+* What if we want only the word "Obama"? or sentence ending in "Clinton"?
+* Need way to express whitespace, end of line, etc. 
+
+### Metacharacters. 
+* `^ i think` will match "i think" at beginning of line
+* `morning$` matches end of line
+* Character classes with [], set of characters we will accept at a point such as `[Bb]` will match upper or lower b
+* Combination `^[Ii] am` will look for either upper or lower I at beginning of line followed by am. 
+* Inside `[]`, can specify ranges with a-z. 
+* Within a character class, ^ denotes NOT matching
+* `.` is used to refer to any character. So `9.11` will match `9-11`, `9/11` etc. 
+* | combines two expressions such as `flood|fire` will match either. Can match multiple alternatives. 
+* Alternatives of | can also be regex `^[Gg]ood|[Bb]ad` will match beginning of line with Good/good or Bad/bad anywhere in line. Can include parenthesis to put ^ on both
+* ? indicates indicated expression is optional. `[Gg]eorge( [Ww]\.)? [Bb]ush`. Note the `\.` was escaped to get the literal `.`
+* `*` means any number including none, and `+` means at least one of the item. 
+* `{}` denotes interval qualifier, specifies min and max number of matches of an expression. `{m,n}` means at least m ut not more than n. `{m}` means exactly m. `{m,}` means at least m matches. 
+* `()` can also be used to remember text matched by the subexpression enclosed. Referred to with \1, \2, etc. Looks for repitition of phrases. 
+* The `*` is greedy and always matches *longest* possible string that satisfies the expression. 
+* Can be turned off as `(.*?)`
+
+Summary: 
+* Regex is used in many languages. 
+* Composed of literals and metacharacters. 
+* Text processing with regex is powerful way to extract data from "unfriendly" sources. 
+* Used with functions `grep`, `grepl`, `sub`, `gsub` and others that involve searching for text strings. 
+
+
+## Task 2: Exploratory Data Analysis  
+The first step in building a predictive model for text is understanding the distribution and relationship between the words, tokens, and phrases in the text. The goal of this task is to understand the basic relationships you observe in the data and prepare to build your first linguistic models.
+
+### Tasks to accomplish
+
+1. **Exploratory analysis** - perform a thorough exploratory analysis of the data, understanding the distribution of words and relationship between the words in the corpora. 
+
+2. **Understand frequencies of words and word pairs** - build figures and tables to understand variation in the frequencies of words and word pairs in the data.
+
+### Questions to consider
+
+1. Some words are more frequent than others - what are the distributions of word frequencies? 
+
+2. What are the frequencies of 2-grams and 3-grams in the dataset? 
+
+3. How many unique words do you need in a frequency sorted dictionary to cover 50% of all word instances in the language? 90%? 
+
+4. How do you evaluate how many of the words come from foreign languages? 
+
+5. Can you think of a way to increase the coverage -- identifying words that may not be in the corpora or using a smaller number of words in the dictionary to cover the same number of phrases?
+
+## Task 3: Modeling 
+
+The goal here is to build your first simple model for the relationship between words. This is the first step in building a predictive text mining application. You will explore simple models and discover more complicated modeling techniques.
+
+*Tasks to accomplish*
+
+1. Build basic n-gram model - using the exploratory analysis you performed, build a basic n-gram model for predicting the next word based on the previous 1, 2, or 3 words.
+
+2. Build a model to handle unseen n-grams - in some cases people will want to type a combination of words that does not appear in the corpora. Build a model to handle cases where a particular n-gram isn't observed.
+
+*Questions to consider*
+
+1. How can you efficiently store an n-gram model (think Markov Chains)?
+
+2. How can you use the knowledge about word frequencies to make your model smaller and more efficient?
+
+3. How many parameters do you need (i.e. how big is n in your n-gram model)?
+
+4. Can you think of simple ways to "smooth" the probabilities (think about giving all n-grams a non-zero probability even if they aren't observed in the data) ?
+
+5. How do you evaluate whether your model is any good?
+
+6. How can you use backoff models to estimate the probability of unobserved n-grams?
+
+*Hints, tips, and tricks*
+
+As you develop your prediction model, two key aspects that you will have to keep in mind are the size and runtime of the algorithm. These are defined as:
+
+1. Size: the amount of memory (physical RAM) required to run the model in R
+
+2. Runtime: The amount of time the algorithm takes to make a prediction given the acceptable input
+
+Your goal for this prediction model is to minimize both the size and runtime of the model in order to provide a reasonable experience to the user.
+
+Keep in mind that currently available predictive text models can run on mobile phones, which typically have limited memory and processing power compared to desktop computers. Therefore, you should consider very carefully (1) how much memory is being used by the objects in your workspace; and (2) how much time it is taking to run your model. Ultimately, your model will need to run in a Shiny app that runs on the 
+shinyapps.io server.
+
+*Tips, tricks, and hints*
+
+Here are a few tools that may be of use to you as you work on their algorithm:
+
+* object.size(): this function reports the number of bytes that an R object occupies in memory
+
+* Rprof(): this function runs the profiler in R that can be used to determine where bottlenecks in your function may exist. The profr package (available on CRAN) provides some additional tools for visualizing and summarizing profiling data.
+
+* gc(): this function runs the garbage collector to retrieve unused RAM for R. In the process it tells you how much memory is currently being used by R.
+
+There will likely be a tradeoff that you have to make in between size and runtime. For example, an algorithm that requires a lot of memory, may run faster, while a slower algorithm may require less memory. You will have to find the right balance between the two in order to provide a good experience to the user.

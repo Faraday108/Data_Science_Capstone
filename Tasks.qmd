@@ -1,0 +1,498 @@
+---
+title: "Untitled"
+format: html
+---
+
+```{r}
+#| label: setup
+#| echo: FALSE
+library(tidyr)
+library(readr)
+library(stringr)
+library(tokenizers)
+library(dplyr)
+library(gt)
+```
+
+
+## Task 1: Data processing/cleaning  
+### Sampling
+To get a representation of data from each of the three sources, I chose to sample equal numbers of lines from each sample. This was straightforward to implement but glosses over that lines from each file might have different numbers of words; for this analysis I chose to disregard this. 
+
+```{r, cache = TRUE}
+set.seed(1234)
+
+blogs_path <- "final/en_US/en_US.blogs.txt"
+news_path <- "final/en_US/en_US.news.txt"
+twitter_path <- "final/en_US/en_US.twitter.txt"
+
+sample_corpus <- function(path, n = 100000) {
+  file_length <- R.utils::countLines(con <- file(path, "rb")); close(con)
+  data <- readLines(con <- file(path, "rb"))[sample(1:file_length, n, replace = FALSE)]; close(con)
+  data
+}
+
+data_blogs <- sample_corpus(blogs_path)
+data_news <- sample_corpus(news_path)
+data_twitter <- sample_corpus(twitter_path)
+data <- c(data_blogs, data_news, data_twitter)
+```
+
+### Removing Punctuation
+Next I opted to remove all punctuation as I am not planning on running any sentiment analysis but rather prediction of next words. By the same logic, I also chose to remove numeric characters - when predicting the next line in a message a specific number is not a useful item to predict. 
+
+```{r, cache = TRUE}
+# Remove anything not [a-zA-Z], space, or apostrophe
+data <- (gsub('[^[:alpha:][:space:]\']', '', data)) %>%
+  tolower()
+
+data[6:10]
+```
+
+### Profanity Filtering
+I searched for a list of profanity that included a wide assortment of negative words that I didn't want to include in the corpus. These were then removed from the data. 
+
+```{r, cache = TRUE}
+if (!file.exists("swearWords.txt")) {
+  download.file("http://www.bannedwordlist.com/lists/swearWords.txt", "swearWords.txt")
+}
+swear_words <- read_csv("swearWords.txt", col_names = FALSE)
+
+word_match_list = function(...) {
+  words = c(...)
+  word_options = paste(words, collapse = "|") # combine the words w/ | between them
+  paste0('\\b(?:', word_options, ')\\b') 
+  # add extra regex formatting that makes it work
+}
+word_list_regex <-  word_match_list(swear_words$X1)
+
+data <- str_remove_all(data, word_list_regex)
+```
+
+### Tokenize
+
+```{r}
+tokenized_words <- tokenize_words(data)
+tokenized_2gram <- tokenize_ngrams(data, n = 2)
+tokenized_3gram <- tokenize_ngrams(data, n = 3)
+tokenized_4gram <- tokenize_ngrams(data, n = 4)
+```
+
+## Task 2: Exploratory Data Analysis
+My next step in building the predictive model is to understand the distribution and relationship between words, tokens, and phrases of the text. To get a grasp of the material, I'll look at the distributions of 1, 2, and 3-grams as well as several questions detailed in the task I'll illustrate below. 
+
+### Word Frequency
+To begin with we can examine the distribution of words from the `tokenized_words` created above with `tokenizers::tokenize_words`. 
+
+```{r}
+word_data <- data.frame(words = unlist(tokenized_words))
+most_common_words_0 <- word_data %>% 
+  count(words, sort = TRUE) %>% 
+  head()
+```
+
+Unsurprisingly, the words `r most_common_words_0$words` are the most common but relatively uninteresting. These can be ignored as they are included in `tm::stopwords()`. 
+
+```{r}
+word_data_nsw <- word_data %>% 
+  anti_join(data.frame(words = tm::stopwords("en")))
+most_common_words_1 <- word_data_nsw %>%
+  count(words, sort = TRUE)
+```
+
+By excluding stopwords, we can now make a plot of the most common words with ggplot. 
+
+```{r}
+library(ggplot2)
+head(most_common_words_1, n = 8) %>% 
+  mutate(words = factor(words, 
+                        levels = head(most_common_words_1, n = 8)$words)) %>%
+  ggplot(aes(x = words, y = n)) + 
+  geom_col() + 
+  labs(title = "10 most common words")
+```
+
+
+### 2-Gram Frequency
+The single most common words don't tell us much information about the set, but common 2-grams may be more illuminating. 
+
+```{r}
+#| cache: true
+#| dependson: most_common_bigrams
+two_gram_data <- data.frame(two_gram = unlist(tokenized_2gram))
+
+most_common_bigrams <- two_gram_data %>%
+  count(two_gram, sort = TRUE)
+
+gt(head(most_common_bigrams, n = 10))
+```
+
+### 3-Gram frequency
+Similarly, three-grams may provide additional insight into common phrases. Initially I noticed that there were 11641 NA's that were the most prevalent type of trigram but realized these were due to finding trigrams of two word lines by evaluating `sum(sapply(tokenized_words, length) < 3)`. 
+
+```{r}
+#| cache: true
+#| dependson: most_common_trigrams
+trigram_data <- data.frame(trigram = unlist(tokenized_3gram)) %>%
+  na.omit()
+
+most_common_trigrams <- trigram_data %>%
+  count(trigram, sort = TRUE)
+
+gt(head(most_common_trigrams, n = 10))
+```
+
+### 4-gram frequency
+For future analysis, I opted to create `most_common_quadgrams` in the same format as the prior work for `bigrams` and `trigrams`. 
+
+```{r}
+#| cache: true
+#| dependson: most_common_quadgrams
+quadgram_data <- data.frame(quadgram = unlist(tokenized_4gram)) %>%
+  na.omit()
+
+most_common_quadgrams <- quadgram_data %>%
+  count(quadgram, sort = TRUE)
+
+gt(head(most_common_quadgrams, n = 10))
+```
+
+
+### Words needed to cover dataset  
+How many words are needed to cover 50% of all word instances? 90%? This is straight forward to answer if the words are sorted by their frequency, converted to proportion by dividing by total number of words in the dataset, and then aggregated with a cumulative sum. Similarly to the evaluation of most common words, for this question to provide an interesting answer, we can first filter out stopwords such as `the`, `and`, `a`, etc. 
+
+```{r}
+#| cache: TRUE
+#| dependson: word_props
+# word data, no stop words
+
+word_props <- word_data_nsw %>%
+  count(words, sort = TRUE) %>%
+  mutate(prop = n/sum(n),
+         cumprop = cumsum(prop)) %>%
+  summarize(`50%` = with(., which.max(cumprop >= .5)), 
+            `90%` = with(., which.max(cumprop >= .9)), 
+            `100%` = nrow(.)) %>%
+  pivot_longer(everything(), names_to = "Percent of corpus", values_to = "Number of words") %>% 
+  select(c(2,1))
+
+gt(word_props, caption = "Number of words to cover varying percentages of all word instances")
+```
+
+Though there are a total of `r nrow(unique(word_data_nsw))` words in the no-stop word dataset, it takes only `r round(word_props[[1,1]]/word_props[[3,1]]*100,2)`% of the total words to describe 50% of all word instances and `r round(word_props[[2,1]]/word_props[[3,1]]*100,2)`% of the total words to describe 90% of all word instances. 
+
+### Finding foreign language words  
+If the data is obtained from websites of one primary language, then I would expect the majority of words acquired in the corpus to be all from the same language. What this indicates to me is that if you sort all word instances by their frequency, the high frequency words are likely to be from the target language while the low frequency words are likely to be typos, misspellings, or words from other languages.  
+Looking at `tail(most_commmon_words_1, n = 10)`, we can see that there are assorted, predominantly foreign, characters clustered at the end of the sorted word list.  
+
+```{r}
+#| echo: FALSE
+gt(tail(most_commmon_words_1, n = 10))
+```
+
+Alternatively, we could also look at which words contain non-ascii characters. A convenint function is `stringi::stri_enc_isascii()`
+
+## Task 3: Modeling  
+### 1. Build basic n-gram model
+Using the exploratory analysis you performed, build a basic n-gram model for predicting the next word based on the previous 1, 2, or 3 words.
+
+To start with, I'd like to work on predicting the next word based on the previous 1 word. The approach for this is based on Markov Chains where we can store bigrams in a data frame with three columns: 1 for the current word, 1 for the next word, and 1 for frequency. This is essentially constructing a lookup table where given a first word, we can look at the probable next word for the sentence. 
+
+This structure is easily expanded to trigrams and quadgrams that can be used to predict on the prior 2 and 3 words. 
+
+```{r}
+bigram_sep <- most_common_bigrams %>%
+  # filter(n > 3) %>%
+  separate_wider_delim(cols = two_gram, 
+                       delim = " ", 
+                       names = c("first", "second"))
+
+trigram_sep <- most_common_trigrams %>% 
+  #filter(n > 2) %>%
+  separate_wider_delim(cols = trigram, 
+                       delim = " ", 
+                       names = c("first", "second", "third"))
+
+quadgram_sep <- most_common_quadgrams %>% 
+  #filter(n > 2) %>%
+  separate_wider_delim(cols = quadgram, 
+                       delim = " ", 
+                       names = c("first", "second", "third", "fourth"))
+
+predict_bigram <- function(phrase = character()) {
+  phrase <- gsub(" $", "", phrase)
+  last_word <- word(phrase, -1)
+  bigram_sep[which(bigram_sep$first == last_word), ]$second[1:3]
+}
+
+predict_trigram <- function(phrase = character()) {
+  phrase <- gsub(" $", "", phrase) # get rid of trailing whitespace
+  next_to_last <- word(phrase, -2)
+  last_word <- word(phrase, -1)
+  trigram_sep[which((trigram_sep$first == next_to_last) & 
+                      (trigram_sep$second == last_word)), ]$third[1:3]
+}
+
+predict_quadgram <- function(phrase = character()) {
+  phrase <- gsub(" $", "", phrase) # get rid of trailing whitespace
+  first <- word(phrase, -3)
+  second <- word(phrase, -2)
+  third <- word(phrase, -1)
+  quadgram_sep[which((quadgram_sep$first == first) & 
+                       (quadgram_sep$second == second) & 
+                       (quadgram_sep$third == third)), ]$fourth[1:3]
+}
+```
+
+Each of these functions takes a phrase, strips off an ending whitespace (an error I encountered), and returns the top three words to come next. With longer ngrams, a common error with a smaller corpus is that a novel phrase may not be seen. To avoid the function returning nothing, we can build a function that takes a phrase and if a match isn't found, then use the next shorter phrase. For example, if "the quick brown" doesn't return a match, we could try to match "quick brown", and even "brown". 
+```{r}
+predict_gram <- function(phrase = character()) {
+  phrase <- gsub(" $", "", phrase) # get rid of trailing whitespace
+  rtrn_guess <- predict_quadgram(phrase)
+  if(is.na(rtrn_guess[2])) {
+    rtrn_guess <- predict_trigram(phrase)
+    if (is.na(rtrn_guess[2])) {
+      rtrn_guess <- predict_bigram(phrase)
+    }
+  }
+  rtrn_guess
+}
+```
+
+#### Analysis  
+This current iteration of the model only takes into account the frequency of a given phrase and doesn't examine the conditional probability of a particular phrase occurring. This approach is examined next.  
+
+## N-Gram model part 2  
+For a more robust model, we should really consider the conditional probability of certain phrases occurring rather than just the frequency of a particular n-gram. As discussed in [Speech and Language Processing: Chapter 3 N-Gram Language Models](https://web.stanford.edu/~jurafsky/slp3/3.pdf), what we're really interested in is probability of word *w* given history *h* but doing this directly is difficult so we need clever ways to approximate it. Note the text uses some conventions for notation: 
+* $P(X_i = "the")$, the probability of word word "the" is abbreviated as $P(the)$. 
+* The sequence of *n* words is abbreviated as either $w_1 \dots w_n$ or $w_{1:n}$ so the expression $w_{1:n-1}$ means the string $w_1, w_2, \dots, w_{n-1}$
+* For joint probability of each word in sequence having a particular value $P(X_1 = w_1, X_2 = w_2, \dots, X_n = w_n)$ we'll use $P(w_1, w_2, \dots, w_n)$
+
+To find probability of an entire sequence of words, we can decompose $P(w_1, w_2, \dots, w_n)$ using the **chain rule of probability** to: 
+
+$$
+\begin{aligned}
+P(w_{1:n}) &= P(w_1)P(w_2|w_1)P(w_3|w_{1:2})\dots P(w_n|w_{1:n-1}) \\
+&=\Pi_{k=1}^n P(w_k|w_{1:k-1})
+\end{aligned}
+$$
+
+This chain rule links computing joint probability of a sequence and computing conditional probability of a word given previous words. The intuition of an n-gram model is that instead of needing to compute the probability of a word given its entire history, we can **approximate** the history by using the last few words.  
+Instead of computing $P(the|Walden Pond's water is so transparent that)$, we can approximate it with $P(the|that)$, the bigram. This can be extended to n-grams as $P(w_n|w_{n-1}) \approx P(w_n|w_{n-N+1:n-1})$, that is looking from (N-1) to -1 words in the past. The challenge of estimating these n-gram probabilities is with **MLE** which says:  
+$$
+P(w_n|w_{n-N+1:n-1}) = \frac{C(w_{n-N+1:n-1}w_n)}{C(w_{n-N+1:n-1})}
+$$
+
+This equation estimates the n-gram probability by dividing the observed frequency of a particular sequence by the observed frequency of the prefix. 
+
+```{r}
+predict_quadgram <- function(phrase = character()) {
+  phrase <- gsub(" $", "", phrase) # get rid of trailing whitespace
+  first <- word(phrase, -3)
+  second <- word(phrase, -2)
+  third <- word(phrase, -1)
+  # sum all counts of first three words of phrase
+  whole_phrase <- sum(quadgram_sep[which((quadgram_sep$first == first) & 
+                                       (quadgram_sep$second == second) & 
+                                       (quadgram_sep$third == third)), ]$n)
+  # number of instances of top quadgram
+  top_phrase <- quadgram_sep[which((quadgram_sep$first == first) & 
+                                       (quadgram_sep$second == second) & 
+                                       (quadgram_sep$third == third)), ][1,]
+  c(top_phrase$fourth, top_phrase$n/whole_phrase)
+}
+```
+
+### Simple Good-Turing discount
+Allows for unseen ngrams to be appropriately included in the dataset. The probability of an unseen ngram is assigned to be equal to the probability of rare ngrams ngrams with a count of 1. "A useful part of Good-Turing methodology is the estimate that the total probability of all unseen objects is N1 / N."
+
+Main steps of simple Good-Turing: 
+1. To handle the case that most of the $N_r$ are zero for large $r$, which is a necessary value when calculating $r^*$. Instead of depending on the raw count $N_r$ of each non-zero frequency, these non-zero values are averaged and replaced by $Z_r = \frac{N_r}{.5(t-q)}$ where $q,r,t$ are successive non-zero $N_r$. When $r$ is the first index, $q$ is taken as 0 and when $r$ is the last index, let $t = 2r-q$. From now on, most of the estimated frequencies will be based on $Z_c$ rather than $N_r$, even though we may still refer to $N_r$. 
+2. Because both the ranges of $r$ and $Z_r$ are large, both the values of $r$ and $Z_r$ are mapped to log space. 
+3. Fit a straight line by linear regression: $\log(Z_r) = a+b\log(r)$ to smooth $Z_r$. 
+
+```{r}
+
+good_turing_smoothing <- function(ngram_counts, total_count, c_star = 0.5) {
+  ngram_probs <- ngram_counts / total_count
+  
+  # Calculate counts for observed and next frequency
+  observed_freq <- ngram_counts
+  next_freq <- c(observed_freq[-1],0)
+  
+  # Calculate c* for unseen events
+  c_star_values <- (c_star * next_freq) / observed_freq
+  
+  # Smoothed probs
+  smoothed_probs <- (ngram_counts + c_star_values) / total_count
+  
+  return(smoothed_probs)
+}
+
+LGT <- function(ngram_sep) {
+  t1 <- table(ngram_sep$n) # Find frequency of different counts
+  t <- c(as.numeric(names(t1))[-1],as.numeric(names(t1))[length(t1)]) # lead 1
+  q <- c(0,as.numeric(names(t1))[-length(t1)]) # lag 1
+  zr <- t1 / (.5*(t-q)) # calculate zr
+  # convert from table object to dataframe
+  zr <- as.data.frame(zr) %>%
+    mutate(z_r = as.numeric(as.character(Var1))
+           ,.keep = "unused") %>%
+    select(c(2,1))
+  
+  # convert nr, unaltered data to dataframe
+  nr <- as.data.frame(t1) %>% 
+    mutate(n_r = as.numeric(as.character(Var1)), 
+           .keep = "unused")
+  smooth_zr <- lm(log10(Freq) ~ log10(z_r), data = zr)
+  return(smooth_zr$coefficients)
+}
+
+
+```
+
+```{r}
+#| eval: FALSE
+#| echo: FALSE
+
+# The following plots the nr and zr values along with the smoothed line to verify that the data here is following the trajectory lined out in "Good-Turing Smoothing without Tears"
+
+t1 <- table(quadgram_sep$n) # Find frequency of different counts
+t <- c(as.numeric(names(t1))[-1],as.numeric(names(t1))[length(t1)]) # lead 1
+q <- c(0,as.numeric(names(t1))[-length(t1)]) # lag 1
+
+zr <- t1 / (.5*(t-q)) # calculate zr
+# convert from table object to dataframe
+zr <- as.data.frame(zr) %>%
+  mutate(z_r = as.numeric(as.character(Var1))
+         ,.keep = "unused") %>%
+  select(c(2,1))
+
+# convert nr, unaltered data to dataframe
+nr <- as.data.frame(t1) %>% 
+  mutate(n_r = as.numeric(as.character(Var1)), 
+         .keep = "unused")
+
+# Find smoothing equation
+smooth_zr <- lm(log10(Freq) ~ log10(z_r), data = zr)
+
+p1 <- ggplot(nr, aes(x = n_r, Freq)) + 
+    geom_point() + 
+    labs(x = "r, frequency", 
+         y = "Nr, frequency of frequency") + 
+    scale_x_continuous(trans = 'log10', 
+                       breaks = 10^c(0:3)) + 
+    scale_y_continuous(trans = 'log10', 
+                       breaks = 10^c(-3:7)) + 
+  coord_fixed(ratio = .5, 
+              xlim = c(1, 700), 
+              ylim = c(.01, 10^7))
+
+p2 <- ggplot(zr, aes(x = z_r, Freq)) + 
+    geom_point() + 
+    labs(x = "r, frequency", 
+         y = "Zr, transformed frequency of frequency") + 
+    scale_x_continuous(trans = 'log10', 
+                       breaks = 10^c(0:3)) + 
+    scale_y_continuous(trans = 'log10', 
+                       breaks = 10^c(-3:7)) + 
+  coord_fixed(ratio = .5, 
+              xlim = c(1, 700), 
+              ylim = c(.01, 10^7)) + 
+  geom_smooth(method = "lm", formula = y ~ x)
+
+gridExtra::grid.arrange(p1, p2, nrow = 1)
+```
+
+
+To find $r^* = (r+1) \frac{S(N_{r+1})}{S(N_r)}$ we can use 
+
+$$
+\log(N_r) = a + b \log(r) \\
+N_r = A r^b \\
+$$
+and 
+$$
+r^* = (r+1) \frac{N_{r+1}}{N_r} \\
+ = (r+1) \frac{A(r+1)^b}{Ar^b} \\
+ = r (1 + 1/r)^{b+1}
+$$
+Where instead of using the values $N_r$, we use the estimates of $Z_r$. The original formula for $r^*$ is termed the *Turing* estimator, and is typically reasonable for small $r$. When the process of replacing $N_r$ with smoothed values $S(N_r)$ we rename the estimator a *Good-Turing* estimator. The rule for choosing the Turing estimate over the Good-Turing estimate is to use Turing as long as they are significantly different from the Good-Turing estimate. The paper "Good-Turing Smoothing Without Tears" describes this point to be when the difference between Turing and Good-Turing is less than 1.65 times the standard deviation of the Turing estimate. Once you switch for the first time, you use Good-Turing for the remainder of the points. 
+
+```{r}
+# Takes in r-values (such as nr$n_r), and coefficients from smoothed fit of Good-Turing and returns estimates for r_star
+rs_GT_est <- function(r, coef) {
+  return(r * (1 + 1/r) ^ (1 + coef[2]))
+}
+
+# Turing estimates of r_star on nr, the raw counts
+rs_T_est <- function(nr) {
+  (nr$n_r + 1) * c(nr$Freq[-1],0) / nr$Freq
+}
+
+add_GT_prob <- function(ngram_sep) {
+  t1 <- table(ngram_sep$n) # Find frequency of different counts
+  # convert nr, unaltered data to dataframe
+  nr <- as.data.frame(t1) %>% 
+    mutate(n_r = as.numeric(as.character(Var1)), 
+           .keep = "unused")
+  smooth_zr <- LGT(ngram_sep)
+  # Compute Turing rstars
+  rs_T <- rs_T_est(nr)
+  # Compute Good-Turing rstars
+  rs_GT <- rs_GT_est(nr$n_r, smooth_zr)
+  
+  # Compute the standard deviation of the Turing estimates as described in paper
+  rs_T_sd <- rep(1, nrow(nr))
+  for (i in 1:nrow(nr)) {
+    rs_T_sd[i] <- (nr$n_r[i]+1)/nr$Freq[i] * sqrt(nr$Freq[i+1]*(1+nr$Freq[i+1]/nr$Freq[i]))
+  }
+  
+  # Make switch from Turing to Linear Good-Turing estimates 
+  rs_combined <- rep(0, nrow(nr))
+  useturing <- TRUE
+  for (i in 1:nrow(nr)) {
+    if (!useturing) {
+      rs_combined[i] <- rs_GT[i]
+    } else if (abs(rs_T - rs_GT)[i] > 1.65*rs_T_sd[i]) {
+      rs_combined[i] <- rs_T[i]
+    } else {
+      useturing <- FALSE
+      rs_combined[i] <- rs_GT[i]
+    }
+  }
+  
+  ## renormalize probabilities 
+  xN <- sum(nr$n_r*nr$Freq)
+  sum_prob <- sum(rs_combined*nr$Freq/xN)
+  # To renormalize, we want to include room for N0 which is approximated as N1/N
+  rs_combined_norm <- (1-nr$Freq[1]/xN)*(rs_combined/xN) / sum_prob
+  
+  pr_freq_lookup <- data.frame(pr = rs_combined_norm, 
+                               n = nr$n_r)
+  
+  left_join(ngram_sep, pr_freq_lookup, by = "n")
+}
+
+quadgram_sep <- add_GT_prob(quadgram_sep)
+trigram_sep <- add_GT_prob(trigram_sep)
+```
+
+```{r}
+predict_quadgram_gt <- function(phrase = character()) {
+  phrase <- gsub(" $", "", phrase) # get rid of trailing whitespace
+  first <- word(phrase, -3)
+  second <- word(phrase, -2)
+  third <- word(phrase, -1)
+  # sum all counts of first three words of phrase
+  whole_phrase <- sum(qgr_tst[which((qgr_tst$first == first) & 
+                                       (qgr_tst$second == second) & 
+                                       (qgr_tst$third == third)), ]$pr)
+  # number of instances of top quadgram
+  top_phrase <- qgr_tst[which((qgr_tst$first == first) & 
+                                       (qgr_tst$second == second) & 
+                                       (qgr_tst$third == third)), ][1,]
+  c(top_phrase$fourth, top_phrase$pr/whole_phrase)
+}
+```
+
