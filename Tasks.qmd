@@ -219,6 +219,7 @@ quadgram_sep <- most_common_quadgrams %>%
                        delim = " ", 
                        names = c("first", "second", "third", "fourth"))
 
+##### OLD - consider deleting
 predict_bigram <- function(phrase = character()) {
   phrase <- gsub(" $", "", phrase)
   last_word <- word(phrase, -1)
@@ -242,6 +243,7 @@ predict_quadgram <- function(phrase = character()) {
                        (quadgram_sep$second == second) & 
                        (quadgram_sep$third == third)), ]$fourth[1:3]
 }
+#########
 ```
 
 Each of these functions takes a phrase, strips off an ending whitespace (an error I encountered), and returns the top three words to come next. With longer ngrams, a common error with a smaller corpus is that a novel phrase may not be seen. To avoid the function returning nothing, we can build a function that takes a phrase and if a match isn't found, then use the next shorter phrase. For example, if "the quick brown" doesn't return a match, we could try to match "quick brown", and even "brown". 
@@ -312,23 +314,6 @@ Main steps of simple Good-Turing:
 3. Fit a straight line by linear regression: $\log(Z_r) = a+b\log(r)$ to smooth $Z_r$. 
 
 ```{r}
-
-good_turing_smoothing <- function(ngram_counts, total_count, c_star = 0.5) {
-  ngram_probs <- ngram_counts / total_count
-  
-  # Calculate counts for observed and next frequency
-  observed_freq <- ngram_counts
-  next_freq <- c(observed_freq[-1],0)
-  
-  # Calculate c* for unseen events
-  c_star_values <- (c_star * next_freq) / observed_freq
-  
-  # Smoothed probs
-  smoothed_probs <- (ngram_counts + c_star_values) / total_count
-  
-  return(smoothed_probs)
-}
-
 LGT <- function(ngram_sep) {
   t1 <- table(ngram_sep$n) # Find frequency of different counts
   t <- c(as.numeric(names(t1))[-1],as.numeric(names(t1))[length(t1)]) # lead 1
@@ -347,8 +332,6 @@ LGT <- function(ngram_sep) {
   smooth_zr <- lm(log10(Freq) ~ log10(z_r), data = zr)
   return(smooth_zr$coefficients)
 }
-
-
 ```
 
 ```{r}
@@ -420,12 +403,12 @@ $$
 Where instead of using the values $N_r$, we use the estimates of $Z_r$. The original formula for $r^*$ is termed the *Turing* estimator, and is typically reasonable for small $r$. When the process of replacing $N_r$ with smoothed values $S(N_r)$ we rename the estimator a *Good-Turing* estimator. The rule for choosing the Turing estimate over the Good-Turing estimate is to use Turing as long as they are significantly different from the Good-Turing estimate. The paper "Good-Turing Smoothing Without Tears" describes this point to be when the difference between Turing and Good-Turing is less than 1.65 times the standard deviation of the Turing estimate. Once you switch for the first time, you use Good-Turing for the remainder of the points. 
 
 ```{r}
-# Takes in r-values (such as nr$n_r), and coefficients from smoothed fit of Good-Turing and returns estimates for r_star
+# Helper: Takes in r-values (such as nr$n_r), and coefficients from smoothed fit of Good-Turing and returns estimates for r_star
 rs_GT_est <- function(r, coef) {
   return(r * (1 + 1/r) ^ (1 + coef[2]))
 }
 
-# Turing estimates of r_star on nr, the raw counts
+# Helper: Turing estimates of r_star on nr, the raw counts
 rs_T_est <- function(nr) {
   (nr$n_r + 1) * c(nr$Freq[-1],0) / nr$Freq
 }
@@ -469,30 +452,58 @@ add_GT_prob <- function(ngram_sep) {
   rs_combined_norm <- (1-nr$Freq[1]/xN)*(rs_combined/xN) / sum_prob
   
   pr_freq_lookup <- data.frame(pr = rs_combined_norm, 
-                               n = nr$n_r)
+                               n = nr$n_r, 
+                               n2 = rs_combined)
   
   left_join(ngram_sep, pr_freq_lookup, by = "n")
 }
 
 quadgram_sep <- add_GT_prob(quadgram_sep)
 trigram_sep <- add_GT_prob(trigram_sep)
+bigram_sep <- add_GT_prob(bigram_sep)
 ```
 
+The following functions modify the original `predict_ngram` functions to instead use the modified Good-Turing probability estimates. This will allow the final implementation of a Katz backoff model. 
+
 ```{r}
+predict_bigram_gt <- function(phrase = character()) {
+  phrase <- gsub(" $", "", phrase)
+  first <- word(phrase, -1)
+  # sum all counts of first word of phrase
+  whole_phrase <- sum(bigram_sep[which(bigram_sep$first == first), ]$pr)
+  # number of instances of top bigram
+  top_phrase <- bigram_sep[which(bigram_sep$first == first), ][1,]
+  data.frame(prediction = top_phrase$second, prob = top_phrase$pr/whole_phrase)
+}
+
+predict_trigram_gt <- function(phrase = character()) {
+  phrase <- gsub(" $", "", phrase) # get rid of trailing whitespace
+  first <- word(phrase, -2)
+  second <- word(phrase, -1)
+  whole_phrase <- sum(trigram_sep[which((trigram_sep$first == first) & 
+                                          (trigram_sep$second == second)), ]$pr)
+  top_phrase <- trigram_sep[which((trigram_sep$first == first) & 
+                                    (trigram_sep$second == second)), ][1,]
+  data.frame(prediction = top_phrase$third, prob = top_phrase$pr/whole_phrase)
+}
+
 predict_quadgram_gt <- function(phrase = character()) {
   phrase <- gsub(" $", "", phrase) # get rid of trailing whitespace
   first <- word(phrase, -3)
   second <- word(phrase, -2)
   third <- word(phrase, -1)
   # sum all counts of first three words of phrase
-  whole_phrase <- sum(qgr_tst[which((qgr_tst$first == first) & 
-                                       (qgr_tst$second == second) & 
-                                       (qgr_tst$third == third)), ]$pr)
+  whole_phrase <- sum(quadgram_sep[which((quadgram_sep$first == first) & 
+                                       (quadgram_sep$second == second) & 
+                                       (quadgram_sep$third == third)), ]$pr)
   # number of instances of top quadgram
-  top_phrase <- qgr_tst[which((qgr_tst$first == first) & 
-                                       (qgr_tst$second == second) & 
-                                       (qgr_tst$third == third)), ][1,]
-  c(top_phrase$fourth, top_phrase$pr/whole_phrase)
+  top_phrase <- quadgram_sep[which((quadgram_sep$first == first) & 
+                                       (quadgram_sep$second == second) & 
+                                       (quadgram_sep$third == third)), ][1,]
+  data.frame(prediction = top_phrase$fourth, prob = top_phrase$pr/whole_phrase)
 }
 ```
+
+#### Katz Backoff  
+I have been misunderstanding the purpose of Katz backoff, much to my chagrin. The prior work has been assuming that what I'm trying to estimate is when I haven't seen a particular ngram *at all*. That is I'm trying to predict "gibberish sell the ___ " but I don't have "gibberish sell the" in my quadgram so I need to find the probability associated with "sell the ___ " instead. This isn't what Katz is for. Instead, it is trying to answer the question is "sell the house" or "sell the book" a better estimate based on the frequency of *both* the trigrams and the bigrams "the house" and "the book". If for instance "sell the house" shows up 10 times and "sell the book" 1 time, my current implementation would predict "house". However, if in the bigram set, "the house" is seen 12 times but "the book" is seen 10,000 time it makes sense that perhaps "sell the book" could be a better estimate. 
 
