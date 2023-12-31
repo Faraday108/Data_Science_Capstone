@@ -1,0 +1,193 @@
+---
+title: "Milestone Report"
+format: html
+---
+
+```{r}
+#| label: setup
+#| echo: FALSE
+library(tidyr)
+library(readr)
+library(stringr)
+library(tokenizers)
+library(dplyr)
+library(gt)
+```
+
+
+## Task 1: Data processing/cleaning  
+### Sampling
+To get a representation of data from each of the three sources, I chose to sample equal numbers of lines from each sample. This was straightforward to implement but glosses over that lines from each file might have different numbers of words; for this analysis I chose to disregard this. 
+
+```{r, cache = TRUE}
+set.seed(1234)
+
+blogs_path <- "final/en_US/en_US.blogs.txt"
+news_path <- "final/en_US/en_US.news.txt"
+twitter_path <- "final/en_US/en_US.twitter.txt"
+
+sample_corpus <- function(path, n = 100000) {
+  file_length <- R.utils::countLines(con <- file(path, "rb")); close(con)
+  data <- readLines(con <- file(path, "rb"))[sample(1:file_length, n, replace = FALSE)]; close(con)
+  data
+}
+
+data_blogs <- sample_corpus(blogs_path)
+data_news <- sample_corpus(news_path)
+data_twitter <- sample_corpus(twitter_path)
+data <- c(data_blogs, data_news, data_twitter)
+```
+
+### Removing Punctuation
+Next I opted to remove all punctuation as I am not planning on running any sentiment analysis but rather prediction of next words. By the same logic, I also chose to remove numeric characters - when predicting the next line in a message a specific number is not a useful item to predict. 
+
+```{r, cache = TRUE}
+# Remove anything not [a-zA-Z], space, or apostrophe
+data <- (gsub('[^[:alpha:][:space:]\']', '', data)) %>%
+  tolower()
+
+data[6:10]
+```
+
+### Profanity Filtering
+I searched for a list of profanity that included a wide assortment of negative words that I didn't want to include in the corpus. These were then removed from the data. 
+
+```{r, cache = TRUE}
+if (!file.exists("swearWords.txt")) {
+  download.file("http://www.bannedwordlist.com/lists/swearWords.txt", "swearWords.txt")
+}
+swear_words <- read_csv("swearWords.txt", col_names = FALSE)
+
+word_match_list = function(...) {
+  words = c(...)
+  word_options = paste(words, collapse = "|") # combine the words w/ | between them
+  paste0('\\b(?:', word_options, ')\\b') 
+  # add extra regex formatting that makes it work
+}
+word_list_regex <-  word_match_list(swear_words$X1)
+
+data <- str_remove_all(data, word_list_regex)
+```
+
+### Tokenize
+
+```{r}
+tokenized_words <- tokenize_words(data)
+tokenized_2gram <- tokenize_ngrams(data, n = 2)
+tokenized_3gram <- tokenize_ngrams(data, n = 3)
+tokenized_4gram <- tokenize_ngrams(data, n = 4)
+```
+
+## Task 2: Exploratory Data Analysis
+My next step in building the predictive model is to understand the distribution and relationship between words, tokens, and phrases of the text. To get a grasp of the material, I'll look at the distributions of 1, 2, and 3-grams as well as several questions detailed in the task I'll illustrate below. 
+
+### Word Frequency
+To begin with we can examine the distribution of words from the `tokenized_words` created above with `tokenizers::tokenize_words`. 
+
+```{r}
+word_data <- data.frame(words = unlist(tokenized_words))
+most_common_words_0 <- word_data %>% 
+  count(words, sort = TRUE) %>% 
+  head()
+```
+
+Unsurprisingly, the words `r most_common_words_0$words` are the most common but relatively uninteresting. These can be ignored as they are included in `tm::stopwords()`. 
+
+```{r}
+word_data_nsw <- word_data %>% 
+  anti_join(data.frame(words = tm::stopwords("en")))
+most_common_words_1 <- word_data_nsw %>%
+  count(words, sort = TRUE)
+```
+
+By excluding stopwords, we can now make a plot of the most common words with ggplot. 
+
+```{r}
+library(ggplot2)
+head(most_common_words_1, n = 8) %>% 
+  mutate(words = factor(words, 
+                        levels = head(most_common_words_1, n = 8)$words)) %>%
+  ggplot(aes(x = words, y = n)) + 
+  geom_col() + 
+  labs(title = "10 most common words")
+```
+
+
+### 2-Gram Frequency
+The single most common words don't tell us much information about the set, but common 2-grams may be more illuminating. 
+
+```{r}
+#| cache: true
+#| dependson: most_common_bigrams
+two_gram_data <- data.frame(two_gram = unlist(tokenized_2gram))
+
+most_common_bigrams <- two_gram_data %>%
+  count(two_gram, sort = TRUE)
+
+gt(head(most_common_bigrams, n = 10))
+```
+
+### 3-Gram frequency
+Similarly, three-grams may provide additional insight into common phrases. Initially I noticed that there were 11641 NA's that were the most prevalent type of trigram but realized these were due to finding trigrams of two word lines by evaluating `sum(sapply(tokenized_words, length) < 3)`. 
+
+```{r}
+#| cache: true
+#| dependson: most_common_trigrams
+trigram_data <- data.frame(trigram = unlist(tokenized_3gram)) %>%
+  na.omit()
+
+most_common_trigrams <- trigram_data %>%
+  count(trigram, sort = TRUE)
+
+gt(head(most_common_trigrams, n = 10))
+```
+
+### 4-gram frequency
+For future analysis, I opted to create `most_common_quadgrams` in the same format as the prior work for `bigrams` and `trigrams`. 
+
+```{r}
+#| cache: true
+#| dependson: most_common_quadgrams
+quadgram_data <- data.frame(quadgram = unlist(tokenized_4gram)) %>%
+  na.omit()
+
+most_common_quadgrams <- quadgram_data %>%
+  count(quadgram, sort = TRUE)
+
+gt(head(most_common_quadgrams, n = 10))
+```
+
+
+### Words needed to cover dataset  
+How many words are needed to cover 50% of all word instances? 90%? This is straight forward to answer if the words are sorted by their frequency, converted to proportion by dividing by total number of words in the dataset, and then aggregated with a cumulative sum. Similarly to the evaluation of most common words, for this question to provide an interesting answer, we can first filter out stopwords such as `the`, `and`, `a`, etc. 
+
+```{r}
+#| cache: TRUE
+#| dependson: word_props
+# word data, no stop words
+
+word_props <- word_data_nsw %>%
+  count(words, sort = TRUE) %>%
+  mutate(prop = n/sum(n),
+         cumprop = cumsum(prop)) %>%
+  summarize(`50%` = with(., which.max(cumprop >= .5)), 
+            `90%` = with(., which.max(cumprop >= .9)), 
+            `100%` = nrow(.)) %>%
+  pivot_longer(everything(), names_to = "Percent of corpus", values_to = "Number of words") %>% 
+  select(c(2,1))
+
+gt(word_props, caption = "Number of words to cover varying percentages of all word instances")
+```
+
+Though there are a total of `r nrow(unique(word_data_nsw))` words in the no-stop word dataset, it takes only `r round(word_props[[1,1]]/word_props[[3,1]]*100,2)`% of the total words to describe 50% of all word instances and `r round(word_props[[2,1]]/word_props[[3,1]]*100,2)`% of the total words to describe 90% of all word instances. 
+
+### Finding foreign language words  
+If the data is obtained from websites of one primary language, then I would expect the majority of words acquired in the corpus to be all from the same language. What this indicates to me is that if you sort all word instances by their frequency, the high frequency words are likely to be from the target language while the low frequency words are likely to be typos, misspellings, or words from other languages.  
+Looking at `tail(most_commmon_words_1, n = 10)`, we can see that there are assorted, predominantly foreign, characters clustered at the end of the sorted word list.  
+
+```{r}
+#| echo: FALSE
+gt(tail(most_commmon_words_1, n = 10))
+```
+
+Alternatively, we could also look at which words contain non-ascii characters. A convenint function is `stringi::stri_enc_isascii()`

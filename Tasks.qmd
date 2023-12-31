@@ -415,6 +415,7 @@ rs_T_est <- function(nr) {
   (nr$n_r + 1) * c(nr$Freq[-1],0) / nr$Freq
 }
 
+# Function to add Turing/Good-Turing discounting to existing ngram_sep data. 
 add_GT_prob <- function(ngram_sep) {
   t1 <- table(ngram_sep$n) # Find frequency of different counts
   # convert nr, unaltered data to dataframe
