@@ -1,6 +1,10 @@
 ---
 title: "Milestone Report"
-format: html
+format: 
+  html: 
+    code-fold: true
+execute: 
+  cache: true
 ---
 
 ```{r}
@@ -17,7 +21,7 @@ library(gt)
 
 ## Task 1: Data processing/cleaning  
 ### Sampling
-To get a representation of data from each of the three sources, I chose to sample equal numbers of lines from each sample. This was straightforward to implement but glosses over that lines from each file might have different numbers of words; for this analysis I chose to disregard this. 
+To get a representation of data from each of the three sources, I chose to sample equal numbers of lines from each sample. This was straightforward to implement but glosses over that lines from each file might have different numbers of words; for this analysis I chose to disregard this factor. 
 
 ```{r, cache = TRUE}
 set.seed(1234)
@@ -32,22 +36,29 @@ sample_corpus <- function(path, n = 100000) {
   data
 }
 
-data_blogs <- sample_corpus(blogs_path)
-data_news <- sample_corpus(news_path)
-data_twitter <- sample_corpus(twitter_path)
-data <- c(data_blogs, data_news, data_twitter)
+if (!file.exists("data/data.csv")) {
+  data_blogs <- sample_corpus(blogs_path)
+  data_news <- sample_corpus(news_path)
+  data_twitter <- sample_corpus(twitter_path)
+  data <- c(data_blogs, data_news, data_twitter)
+  write_csv(data.frame(lines = data), "data/data.csv")
+}
+
+data <- read_csv("data/data.csv", show_col_types = FALSE)
 ```
 
-### Removing Punctuation
-Next I opted to remove all punctuation as I am not planning on running any sentiment analysis but rather prediction of next words. By the same logic, I also chose to remove numeric characters - when predicting the next line in a message a specific number is not a useful item to predict. 
+### Cleaning data
+Next I opted to remove all punctuation as I am not planning on running any sentiment analysis, but rather solely prediction of next words. By the same logic, I also chose to remove numeric characters - when predicting the next line in a message a specific number is not a useful item to predict. Finally, I changed all letters to lowercase to remove any ambiguity between phrases such as "i" and "I" or "pittsburgh" and "Pittsburgh.
 
 ```{r, cache = TRUE}
 # Remove anything not [a-zA-Z], space, or apostrophe
-data <- (gsub('[^[:alpha:][:space:]\']', '', data)) %>%
+data <- data$lines %>% gsub('[^[:alpha:][:space:]\']', '', .) %>%
   tolower()
 
-data[6:10]
+data[1:5]
 ```
+
+A potential shortcoming of this approach is that I am not using an interesting piece of information: beginning and end of sentence. In the structure of the English language, there are likely phrases that show up more often in the beginning, middle, or end of a sentence. Ultimately, for the model I am planning on building, simply predicting the next word, I am uncertain of the need for this and the additional overhead that the algorithm would run through. In a future implementation of this model, I would like to incorporate the beginning/end of sentence information.  
 
 ### Profanity Filtering
 I searched for a list of profanity that included a wide assortment of negative words that I didn't want to include in the corpus. These were then removed from the data. 
@@ -56,7 +67,7 @@ I searched for a list of profanity that included a wide assortment of negative w
 if (!file.exists("swearWords.txt")) {
   download.file("http://www.bannedwordlist.com/lists/swearWords.txt", "swearWords.txt")
 }
-swear_words <- read_csv("swearWords.txt", col_names = FALSE)
+swear_words <- read_csv("swearWords.txt", col_names = FALSE, show_col_types = FALSE)
 
 word_match_list = function(...) {
   words = c(...)
@@ -64,12 +75,17 @@ word_match_list = function(...) {
   paste0('\\b(?:', word_options, ')\\b') 
   # add extra regex formatting that makes it work
 }
-word_list_regex <-  word_match_list(swear_words$X1)
 
+word_list_regex <-  word_match_list(swear_words$X1)
+pre_cleanup_n <- sum(lengths(strsplit(data, "\\W+")))
 data <- str_remove_all(data, word_list_regex)
+post_cleanup_n <- sum(lengths(strsplit(data, "\\W+")))
 ```
 
+Cleaning up with the chosen list of profanity removes a total of `r pre_cleanup_n - post_cleanup_n` words from the corpus. 
+
 ### Tokenize
+Now that the data has been cleaned, I can tokenize, that is find instances of single words, bigrams (two word sets), trigrams (three word sets), and quadgrams (4 word sets). This is easily achieved with the `tokenize_ngrams` function where different lengths of ngrams are passed. 
 
 ```{r}
 tokenized_words <- tokenize_words(data)
@@ -87,11 +103,10 @@ To begin with we can examine the distribution of words from the `tokenized_words
 ```{r}
 word_data <- data.frame(words = unlist(tokenized_words))
 most_common_words_0 <- word_data %>% 
-  count(words, sort = TRUE) %>% 
-  head()
+  count(words, sort = TRUE)
 ```
 
-Unsurprisingly, the words `r most_common_words_0$words` are the most common but relatively uninteresting. These can be ignored as they are included in `tm::stopwords()`. 
+Unsurprisingly, the words `r head(most_common_words_0$words)` are the most common but relatively uninteresting. These can be ignored as they are included in `tm::stopwords()`. 
 
 ```{r}
 word_data_nsw <- word_data %>% 
@@ -128,7 +143,7 @@ gt(head(most_common_bigrams, n = 10))
 ```
 
 ### 3-Gram frequency
-Similarly, three-grams may provide additional insight into common phrases. Initially I noticed that there were 11641 NA's that were the most prevalent type of trigram but realized these were due to finding trigrams of two word lines by evaluating `sum(sapply(tokenized_words, length) < 3)`. 
+Similarly, three-grams may provide additional insight into common phrases. Initially I noticed that there were 11641 NA's that were the most prevalent type of trigram but realized these were due to finding trigrams of two word lines by evaluating `sum(sapply(tokenized_words, length) < 3)` and was rectified by passing the trigram data to `na.omit()`.
 
 ```{r}
 #| cache: true
@@ -179,15 +194,24 @@ word_props <- word_data_nsw %>%
 gt(word_props, caption = "Number of words to cover varying percentages of all word instances")
 ```
 
-Though there are a total of `r nrow(unique(word_data_nsw))` words in the no-stop word dataset, it takes only `r round(word_props[[1,1]]/word_props[[3,1]]*100,2)`% of the total words to describe 50% of all word instances and `r round(word_props[[2,1]]/word_props[[3,1]]*100,2)`% of the total words to describe 90% of all word instances. 
+Though there are a total of `r nrow(unique(word_data_nsw))` words in the no-stop word dataset, it takes only `r round(word_props[[1,1]]/word_props[[3,1]]*100,2)`% of the total words to describe 50% of all word instances and `r round(word_props[[2,1]]/word_props[[3,1]]*100,2)`% of the total words to describe 90% of all word instances. If future implementation of an ngram model proves too slow, this is one place where a speedup could occur: if the size of the corpus is decreased evaluation may speed up. 
 
 ### Finding foreign language words  
 If the data is obtained from websites of one primary language, then I would expect the majority of words acquired in the corpus to be all from the same language. What this indicates to me is that if you sort all word instances by their frequency, the high frequency words are likely to be from the target language while the low frequency words are likely to be typos, misspellings, or words from other languages.  
-Looking at `tail(most_commmon_words_1, n = 10)`, we can see that there are assorted, predominantly foreign, characters clustered at the end of the sorted word list.  
+Looking at `tail(most_common_words_1, n = 10)`, we can see that there are assorted, predominantly foreign, characters clustered at the end of the sorted word list.  
 
 ```{r}
 #| echo: FALSE
-gt(tail(most_commmon_words_1, n = 10))
+gt(tail(most_common_words_1, n = 10))
 ```
 
-Alternatively, we could also look at which words contain non-ascii characters. A convenint function is `stringi::stri_enc_isascii()`
+Alternatively, we could also look at which words contain non-ascii characters. A convenient function is `stringi::stri_enc_isascii()` which checks whether characters are encoded with 127 or less bits (length of ascii characters). I chose to include the foreign words in the corpus as there were relatively few and these basic filters would eliminate words like "café" and "cliché". 
+
+## Next Steps  
+### Prediction algorithm  
+The next step in this project will be to create a prediction algorithm based on n-grams. A basic implementation would be to use the highest match of ngram if it exists to predict the next word via maximum likelihood. 
+
+What I'm targeting to implement is a more rigorous treatment that includes linear Good-Turing smoothing (to help improve low count estimates) and Katz backoff. 
+
+### Shiny app
+The envisioned Shiny app will take a user's input and either upon click of a button or live will show the result of the next most likely word. Which implementation used will depend on how quickly the prediction algorithm runs: if a user has to wait more than 500ms or so for the result to automatically display they may wonder if anything is happening. Adding a button and perhaps a progress bar would show feedback that the algorithm is working behind the scenes. 
