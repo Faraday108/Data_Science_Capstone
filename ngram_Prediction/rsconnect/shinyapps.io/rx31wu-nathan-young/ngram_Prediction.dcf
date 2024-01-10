@@ -1,0 +1,12 @@
+name: ngram_Prediction
+title: ngram_Prediction
+username: rx31wu-nathan-young
+account: rx31wu-nathan-young
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 10898428
+bundleId: 8129918
+url: https://rx31wu-nathan-young.shinyapps.io/ngram_Prediction/
+version: 1
+asMultiple: FALSE
+asStatic: FALSE
