@@ -16,11 +16,11 @@ incProgress(3/4, detail = "Quadgram")
 quadgram_sep <- read_csv("data/quadgram_trim5.csv")
 
 # Prediction functions
-katz_bigram <- function(phrase = character()) {
+katz_bigram <- function(phrase = character(), mgram, bgram) {
   phrase <- gsub(" $", "", phrase) %>%
     tolower() # get rid of trailing whitespace
   first <- word(phrase, -1) # find last word of phrase
-  matches <- bigram_sep[which(bigram_sep$first == first),] #find next word 
+  matches <- bgram[which(bgram$first == first),] #find next word 
   alpha <- 1 - sum(matches$n2) / sum(matches$n)
   top_match <- matches[1,]
   top_A_prob <- sum(matches$n) # total probability of all i-1
@@ -36,7 +36,7 @@ katz_bigram <- function(phrase = character()) {
   }
   
   # find set B: words that are not in A
-  setB <- anti_join(monogram, bigram_sep[which(bigram_sep$first == phrase),], by = join_by(words == second))
+  setB <- anti_join(mgram, bgram[which(bgram$first == phrase),], by = join_by(words == second))
   # Find top match in B and probability = alpha * c(wi)/c(w)
   top_B <- data.frame(prediction = setB$words[1], prob = alpha * setB$n[1]/sum(setB$n))
   top_10B <- data.frame(prediction = setB$words[1:10], 
@@ -53,13 +53,13 @@ katz_bigram <- function(phrase = character()) {
   # }
 }
 
-katz_trigram <- function(phrase = character()) {
+katz_trigram <- function(phrase = character(), mgram = mgram, bgram = bgram, tgram = tgram) {
   phrase <- gsub(" $", "", phrase) %>%
     tolower() # get rid of trailing whitespace
   first <- word(phrase, -2)
   second <- word(phrase, -1)
-  matches <- trigram_sep[which(trigram_sep$first == first & 
-                                 trigram_sep$second == second),] #find next word 
+  matches <- tgram[which(tgram$first == first & 
+                                 tgram$second == second),] #find next word 
   alpha <- 1 - sum(matches$n2) / sum(matches$n)
   
   top_match <- matches[1,]
@@ -76,11 +76,11 @@ katz_trigram <- function(phrase = character()) {
   }
   
   # find set B: words that are not in A
-  setB <- anti_join(monogram, matches, by = join_by(words == third))
+  setB <- anti_join(mgram, matches, by = join_by(words == third))
   # Find top match in B and probability = alpha * qBO(wi|wi-1) / sum(qBO(w|wi-1))
 
   setB_bigrams <- data.frame(first = second, second = setB$words)
-  setB_matches <- semi_join(bigram_sep, 
+  setB_matches <- semi_join(bgram, 
                             setB_bigrams, 
                             by = join_by(first, second))
   top_B <- data.frame(prediction = setB_matches$second[1],
@@ -100,16 +100,16 @@ katz_trigram <- function(phrase = character()) {
   # }
 }
 
-katz_quadgram <- function(phrase) {
+katz_quadgram <- function(phrase, mgram = mgram, tgram = tgram, qgram = qgram) {
   phrase <- gsub(" $", "", phrase) %>%
     tolower() # get rid of trailing whitespace
   first <- word(phrase, -3)
   second <- word(phrase, -2)
   third <- word(phrase, -1)
   
-  matches <- quadgram_sep[which(quadgram_sep$first == first & 
-                                  quadgram_sep$second == second & 
-                                  quadgram_sep$third == third),] #find next word 
+  matches <- qgram[which(qgram$first == first & 
+                           qgram$second == second & 
+                           qgram$third == third),] #find next word 
   alpha <- 1 - sum(matches$n2) / sum(matches$n)
   top_match <- matches[1,]
   top_A_prob <- sum(matches$n) # total probability of all i-1
@@ -125,11 +125,11 @@ katz_quadgram <- function(phrase) {
   }
   
   # find set B: words that are not in A
-  setB <- anti_join(monogram, matches, by = join_by(words == fourth))
+  setB <- anti_join(mgram, matches, by = join_by(words == fourth))
   # Find top match in B and probability = alpha * qBO(wi|wi-2,wi-1) / sum(qBO(w|wi-2,wi-1))
   
   setB_trigrams <- data.frame(first = second, second = third, third = setB$words)
-  setB_matches <- semi_join(trigram_sep, 
+  setB_matches <- semi_join(tgram, 
                             setB_trigrams, 
                             by = join_by(first, second, third))
   top_B <- data.frame(prediction = setB_matches$third[1],
@@ -149,16 +149,16 @@ katz_quadgram <- function(phrase) {
   # }
 }
 
-katz_ngram <- function(phrase = character()) {
+katz_ngram <- function(phrase = character(), mgram, bgram, tgram, qgram) {
   phrase <- gsub(" $", "", phrase) # get rid of trailing whitespace
   len <- length(strsplit(phrase, "\\W+")[[1]])
   
   if (len >= 3) {
-    rtrn_guess <- katz_quadgram(phrase)
+    rtrn_guess <- katz_quadgram(phrase, mgram, tgram, qgram)
     if(nrow(rtrn_guess) < 10) {
-      rtrn_guess <- katz_trigram(phrase)
+      rtrn_guess <- katz_trigram(phrase, mgram, bgram, tgram)
       if (nrow(rtrn_guess) < 10) {
-        rtrn_guess <- katz_bigram(phrase)
+        rtrn_guess <- katz_bigram(phrase, mgram, bgram)
         if(nrow(rtrn_guess) < 10) {
           return("Not in corpus")
         }
@@ -166,16 +166,16 @@ katz_ngram <- function(phrase = character()) {
     }
     rtrn_guess
   } else if (len == 2) {
-    rtrn_guess <- katz_trigram(phrase)
+    rtrn_guess <- katz_trigram(phrase, mgram, bgram, tgram)
     if(nrow(rtrn_guess) < 10) {
-      rtrn_guess <- katz_bigram(phrase)
+      rtrn_guess <- katz_bigram(phrase, mgram, bgram)
       if (nrow(rtrn_guess) < 10) {
         return("Not in corpus")
       }
     } 
     rtrn_guess
   } else {
-    rtrn_guess <- katz_bigram(phrase)
+    rtrn_guess <- katz_bigram(phrase, mgram, bgram)
     if(nrow(rtrn_guess) < 10) {
       return("Not in corpus")
     }

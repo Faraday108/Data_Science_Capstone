@@ -19,9 +19,16 @@ fluidPage(
                     value = "", 
                     placeholder = "Enter text here"), 
       actionButton("go", "Predict"), 
-      sliderInput("trimC", "Trim ngram frequencies", min = 5, max = 1000, value = 5), 
-      p("Trimming ngram frequencies will speed up predictions at the cost of 
-        reduced accuracy.")
+      hr(),
+      h3("Change Computation Time"),
+      sliderInput("trimM", "Monogram", min = 1, max = 100, value = 100, ticks = FALSE, post = "%"), 
+      sliderInput("trimB", "Bigram", min = 1, max = 100, value = 100, ticks = FALSE, post = "%"), 
+      sliderInput("trimT", "Trigram", min = 1, max = 100, value = 100, ticks = FALSE, post = "%"), 
+      sliderInput("trimQ", "Quadgram", min = 1, max = 100, value = 100, ticks = FALSE, post = "%"),
+      p("Using a smaller percentage of data will reduce computation time by including
+        only the most frequently seen combinations. However, leaving out less 
+        frequently seen combinations will reduce flexibility and accuracy."),
+      htmlOutput("subsetL")
     ),
     
     # Show a plot of the generated distribution
