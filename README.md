@@ -14,7 +14,7 @@ This project was broken down on Coursera into pieces including:
 
 For a more complete examination of what the task details, see the Notes and Tasks files. In Notes, I recorded information from the Coursera page so I had a single place to go and review the progress of the project goals and in Tasks, I implemented many of them. Occasional chunks of the project were split into separate files as necessary for building Shiny app.
 
-### Descripton of Files in Repo
+### Description of Files in Repo
 
 -   **Milestone Report**: halfway through the project, a milestone report was created that detailed the results of exploratory data analysis and the state of the project.
 -   **Notes.qmd**: record of tasks from Coursera
