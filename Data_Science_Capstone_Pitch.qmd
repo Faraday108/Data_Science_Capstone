@@ -1,0 +1,51 @@
+---
+title: "Data Science Capstone Pitch"
+subtitle: "An ngram prediction algoritm"
+author: "Nathan Young"
+format: 
+  revealjs: 
+    theme: moon
+---
+
+## The Task
+
+-   To complete the Data Science Specalization from Johns Hopkins on Coursera, the final Capstone Project task is to create an n-gram prediction model deployed on Shiny.\
+-   The predictive model is built from a provided corpus of text scraped from three sources: blogs, the news, and Twitter. It compares a phrase input to the Shiny app to the analyzed corpus and predicts the next word. To provide additional insight, the app shows the top 10 results. Additionally, the size of the model can be decreased to speed compute time at the cost of accuracy.
+
+## Data Cleaning and Analysis
+
+-   To build the model, the provided corpus was preprocessed by:
+    -   Removing punctuation
+    -   Setting all characters to lowercase
+    -   Removing profanity
+-   After cleaning, the data is split into 4 different ngram sets: monograms, bigrams, trigrams, and quadgrams. Each set is then converted to frequencies of each observed ngram.
+
+## Model Function {.smaller}
+
+-   The selected model was Katz Backoff.
+    -   Functions by finding the maximum likelihood next word for the highest ngram available while also considering the next lower ngram according to:
+
+$$
+P_{bo}(w_i|w_{i-n+1 \dots w_{i-1}}) = \\
+\left\{
+  \begin{array}{lr}
+  P^*(w_i|w_{i-n+1:n-1}),   \text{if } C(w_{i-n+1:n}) > 0 \\ 
+  \alpha(w_{i-n+1:n-1})P_{bo}(w_i|w_{i-n+2:n-1}), \text{ otherwise}
+  \end{array}
+\right.
+$$
+
+* In summary, the probability of a word to complete the phrase for observed ngrams is determined by the discounted probability $P^*$ (from Linear Good Turing smoothing). 
+* The probability of backoff to a lower ngram is determined by unseen word combinations $C(w|w_{i-n-1:n)})$ times the leftover discounted probability $\alpha$
+
+## Application Example {.smaller}
+:::: {.columns}
+::: {.column width="30%"}
+* [App Link](https://rx31wu-nathan-young.shinyapps.io/ngram_Prediction/)
+* To run the app - input a phrase in the textbox and click "PREDICT". The top result and a table of the top 10 will be displayed. 
+* To speed computation, the size of the ngrams can optionally be reduced with the sliders on the left. 
+:::
+::: {.column width="70%"}
+![](app_example.png)
+:::
+::::
